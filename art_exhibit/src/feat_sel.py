@@ -1,0 +1,121 @@
+import pandas as pd
+import numpy as np
+
+import os
+import argparse
+import joblib
+import calc_metric
+from scipy.stats import boxcox
+from scipy.special import inv_boxcox
+
+from sklearn import metrics
+from sklearn import preprocessing
+
+import config
+import model_dispatcher
+
+def run(fold, arg_model):
+
+    df = pd.read_csv(config.TRAINING_FILE_1)
+
+    # drop_cols = [
+    #     'scheduled_year', 'scheduled_weekofyear', 'scheduled_month', 
+    #     'scheduled_dayofweek', 'scheduled_weekend', 'delivery_year', 
+    #     'delivery_weekofyear', 'delivery_month', 'delivery_dayofweek', 
+    #     'delivery_weekend', "City", "Code"
+    # ]
+
+    # df = df.drop(drop_cols, axis=1)
+    
+    selected_features = ['Weight', 'Price Of Sculpture', 'Width', 'Height', 
+        'Artist Reputation', 'Base Shipping Price', 'Material', 'Express Shipment', 
+        'Transport', 'Installation Included', 'scheduled_month', 'Fragile'
+    ]
+
+    # list of numerical columns
+    num_cols = ["Artist Reputation", "Height", "Width", "Price Of Sculpture", "Base Shipping Price"]
+
+    # all columns are features except income and kfold columns
+    # features = [
+    #     f for f in selected_features if f not in ("kfold", "Cost", "Customer Id")
+    # ]
+
+    # for col in features:
+    #     # do not encode the numerical columns
+    #     if col not in num_cols:
+    #         # initialize LabelEncoder for each feature column
+    #         lbl = preprocessing.LabelEncoder()
+
+    #         # fit label encoder on all data
+    #         lbl.fit(df[col])
+
+    #         # transform all data
+    #         df.loc[:, col] = lbl.transform(df[col])
+    
+    # # initialize minmax scaler
+    # scaler = preprocessing.MinMaxScaler()
+
+    # # fit_transform scaler on num_cols
+    # df[num_cols] = scaler.fit_transform(df[num_cols])
+
+    # get training data using folds
+    df_train = df[df.kfold != fold].reset_index(drop=True)
+
+    # get validation data using folds
+    df_valid = df[df.kfold == fold].reset_index(drop=True)
+
+    # get training data
+    x_train = df_train[selected_features].values
+
+    # get validation data
+    x_valid = df_valid[selected_features].values
+
+    # initialise linear regression model
+    model = model_dispatcher.models[arg_model]
+
+    # fit model on training data
+    model.fit(x_train, boxcox(df_train.Cost, -0.398686))
+
+    # predict on validation data
+    valid_preds_log = model.predict(x_valid)
+
+    valid_preds = inv_boxcox(valid_preds_log, -0.398686)
+
+    valid_preds = np.absolute(valid_preds)
+
+    # calculate score
+    score = calc_metric.calc_score(df_valid.Cost.values, valid_preds)
+    
+
+    # print rmse
+    print(f"Fold = {fold}, Score = {score}")
+    
+    # save the model
+    # joblib.dump(
+    #     model,
+    #     os.path.join(config.MODEL_OUTPUT, f"lbl_rf_boxcox/{arg_model}_{fold}.bin")
+    # )
+
+    return score
+
+if __name__ == "__main__":
+
+    # initialize ArgumentParser class of argparse
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--model",
+        type=str
+    )
+
+    scores = []
+
+    # read arguments from command line
+    args = parser.parse_args()
+
+    # run model specified by command line
+    for fold_ in range(5):
+        score = run(fold=fold_, arg_model=args.model)
+        scores.append(score)
+    print(np.mean(scores))
+    
